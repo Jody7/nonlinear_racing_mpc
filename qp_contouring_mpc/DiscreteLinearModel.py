@@ -142,7 +142,5 @@ class DiscreteLinearModel():
 		Bd[sx][su] = Ts
 
 		gd = np.pad(Bd_ss[:,-1], ((0, 1), (0, 0)), mode='constant')
-		
-		print(Ad)
-		print(Bd)
-		print(gd)
+
+		return Ad, Bd, gd
