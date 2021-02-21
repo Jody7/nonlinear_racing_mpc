@@ -12,8 +12,30 @@ def getEqualityConstraints(Xk, Uk, model_params, dlsm):
 
 	Ad, Bd, gd = dlsm.get_discrete_model(Xk, Uk, model_params, model_params.dt_sim)
 	# no input/state scaling
-
 	return Ad, Bd, gd
+
+def getInequalityConstraints(border, model_params):
+	nx = model_params.nx
+	nu = model_params.nu
+
+	x1 = border[0][0]
+	y1 = border[1][0]
+	x2 = border[2][0]
+	y2 = border[3][0]
+
+	numer = -(x2-x1)
+	denom = (y2-y1)
+	dbmax = max(numer*x1-denom*y1,numer*x2-denom*y2)
+	dbmin = min(numer*x1-denom*y1,numer*x2-denom*y2)
+
+	Ck = np.zeros(nx+nu)
+	Ck[0] = numer
+	Ck[1] = -denom
+	ug = dbmax
+	lg = dbmin
+
+	return Ck, ug, lg
+
 
 class MPC_solve():
 
@@ -24,11 +46,8 @@ class MPC_solve():
 	def solve_routine(self, TrackMPC, N, model_params, Xhor, Uhor, x0, u0):
 		theta_phys = []
 		for i in range(N):
-			x_pos = Xhor[0][i]
-			y_pos = Xhor[1][i]
 			theta_virt = Xhor[model_params.nx - 1][i] % TrackMPC['tl']
 			theta_phys.append(theta_virt)
-
 
 		TrackLeftx = []
 		TrackLefty = []
@@ -54,6 +73,7 @@ class MPC_solve():
 			Xk = Xhor[:,i];
 			Uk = Uhor[:,i];
 			stage[0]["Ak"], stage[0]["Bk"], stage[0]["gk"] = getEqualityConstraints(Xk, Uk, model_params, self.dlsm)
+			stage[0]["Ck"], stage[0]["ug"], stage[0]["lg"] = getInequalityConstraints(borders[:,max(i, 1)], model_params)
 
 		cost = 0.0
 		constr = []
@@ -75,8 +95,8 @@ class MPC_solve():
 
 			#cost += (1 - x[0][stage_idx])**2
 			#cost += (1 - x[1][stage_idx])**2
-			#cost += (1.0 - u[0][stage_idx])**2
-			#cost += (-0.2 - u[1][stage_idx])**2
+			cost += (1.0 - u[0][stage_idx])**2
+			cost += (-0.2 - u[1][stage_idx])**2
 
 		problem = cvxpy.Problem(cvxpy.Minimize(cost), constr)
 		starttime = time.time()

@@ -51,7 +51,6 @@ def find_theta(currentPosition,trackCenter,traj_breaks,trackWidth,last_closestId
 			smallest_idx = search_idx
 	previous_idx = (smallest_idx - 1) % len(trackCenter[0])
 	cosinus = np.dot(np.array([posX, posY]) - trackCenter[:,smallest_idx], trackCenter[:,previous_idx] - trackCenter[:,smallest_idx])
-
 	minIndex2 = 0
 	minIndex = smallest_idx
 
@@ -126,7 +125,8 @@ def start_mpc():
 		# apply linearized mp estimate and solution to ODE to get nonlinear sol
 		x0 = sim.step(dt_sim, x[:,0], u[:,0], model_params)
 		u0 = u[:,0]
-		theta = find_theta([track['center'][0][startIdx],track['center'][1][startIdx]],track['center'],traj['ppx']['breaks'],trackWidth,0)
+		theta = find_theta([x0[0], x0[1]],track['center'],traj['ppx']['breaks'],trackWidth,0)
+		print("theta:", theta)
 		x0[model_params.nx-1] = theta
 
 		car_pos_list_x.append(x[0][0])

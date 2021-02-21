@@ -131,7 +131,7 @@ class DiscreteLinearModel():
 
 		# super ghetto but should be fine
 		ss = signal.StateSpace(Ac, Bc_aug, np.zeros_like(Ac), np.zeros_like(Bc_aug))
-		ss = ss.to_discrete(0.1, method='zoh') # zoh should be fine and (i think) this implemention uses matrix exponentiation to do it 
+		ss = ss.to_discrete(ModelParams.dt_sim, method='zoh') # zoh should be fine and (i think) this implemention uses matrix exponentiation to do it 
 
 		Ad_ss = np.matrix(ss.A)
 		Ad = np.pad(Ad_ss[:,:sx], (0, 1), mode='constant')

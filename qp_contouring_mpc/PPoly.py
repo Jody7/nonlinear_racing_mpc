@@ -17,6 +17,8 @@ class PiecePoly():
 		dim = 0
 	def eval(self, x):
 		poly_idx = bisect_right(self.breaks[0], x)
+		if poly_idx == len(self.coefs):
+			poly_idx = poly_idx - 1
 		return self.horner(self.coefs[poly_idx], x)
 
 class PPoly():
