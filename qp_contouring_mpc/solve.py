@@ -73,10 +73,10 @@ def start_mpc():
 	global x, u, x0, u0, car_pos_list_x, car_pos_list_y
 	sim = SimulateSys()
 
-	dt_sim = 0.01
+	dt_sim = 0.02
 	x0 = np.zeros(7)
 	u0 = np.zeros(3)
-	model_params = ModelParams(0.287, 0.0545*0.8, 0.0518*0.8, 0.0035*0.8, 3.38, 1.26, 0.173, 2.57, 1.2, 0.192, 0.041, 27.8e-6, 0.029, 0.033)
+	model_params = ModelParams(0.287, 0.0545, 0.0518, 0.0035, 3.38, 1.26, 0.173, 2.57, 1.2, 0.192, 0.041, 27.8e-6, 0.029, 0.033)
 	model_params.set_info(7, 3, dt_sim)
 	dlsm = DiscreteLinearModel()
 
@@ -94,16 +94,17 @@ def start_mpc():
       	math.atan2(ppoly.mkpp(traj['dppy']['breaks'], traj['dppy']['coefs']).eval(theta),
 		ppoly.mkpp(traj['dppx']['breaks'], traj['dppx']['coefs']).eval(theta)),
       0,0,0,theta])
-	print(x0)
     # ------------
 
 	mpc_solve = MPC_solve(dlsm)
-	N = 10
-	x = np.zeros((7,N+1)) # needs to be initialized as copys of x0 eventually
+	N = 40
+	x = np.zeros((7,N+1))
+	for i in range(N+1):
+		x[:,i] = x0
 	u = np.zeros((3,N))
 
 	fig, (ax1) = plt.subplots(1,1)
-	lines = [(ax1.plot([], [], lw=2)[0])]
+	lines = [(ax1.plot([], [], lw=2)[0]), (ax1.plot([], [], lw=2)[0]), (ax1.plot([], [], lw=2)[0])]
 	car_pos_list_x = []
 	car_pos_list_y = []
 	axis_lims_inner = 4
@@ -111,22 +112,19 @@ def start_mpc():
 	ax1.set_ylim(-axis_lims_inner, axis_lims_inner)
 	ax1.set_aspect('equal', 'box')
 
+	lines[1].set_data(TrackMPC['track']['inner'][0], TrackMPC['track']['inner'][1])
+	lines[2].set_data(TrackMPC['track']['outer'][0], TrackMPC['track']['outer'][1])
+
 	def solve(solve_idx):
 		global x, u, x0, u0
 		x, u = augmentState(sim, x, u, x0, model_params, N)
 		x, u = mpc_solve.solve_routine(TrackMPC, N, model_params, x, u, x0, u0)
 
-		print("---")
-		for i in range(1):
-			print("x", x[:,i])
-			if i < N:
-				print("u", u[:,i])
-
 		# apply linearized mp estimate and solution to ODE to get nonlinear sol
 		x0 = sim.step(dt_sim, x[:,0], u[:,0], model_params)
 		u0 = u[:,0]
 		theta = find_theta([x0[0], x0[1]],track['center'],traj['ppx']['breaks'],trackWidth,0)
-		print("theta:", theta)
+		print("theta:", theta, "u0 in solve:" ,u0)
 		x0[model_params.nx-1] = theta
 
 		car_pos_list_x.append(x[0][0])
@@ -135,14 +133,8 @@ def start_mpc():
 
 		return lines
 
-
 	anim = animation.FuncAnimation(fig, solve, 100000, interval=1, blit=True, repeat=False)
 	plt.show()
-
-	# global control loop
-	#stop_time = 1.0
-	#for global_sim_time in np.linspace(0, stop_time, int(stop_time/dt_sim)):
-	#	solve()
 
 
 np.set_printoptions(precision=4, suppress=True)

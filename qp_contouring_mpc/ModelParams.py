@@ -1,3 +1,6 @@
+import numpy as np
+import math
+
 class ModelParams():
 	def set_info(self, nx, nu, dt_sim):
 		self.nx = nx
@@ -19,3 +22,8 @@ class ModelParams():
 		self.Iz = Iz
 		self.lf = lf
 		self.lr = lr
+		
+		self.Tx = np.diag(1 / np.array([3,3,2*math.pi,4,2,7,30]))
+		self.invTx = np.linalg.inv(self.Tx)
+		self.Tu = np.diag(1 / np.array([1,0.35,6]))
+		self.invTu = np.linalg.inv(self.Tu)
