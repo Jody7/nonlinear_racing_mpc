@@ -1,4 +1,4 @@
-import math
+import math, time
 import numpy as np
 from bisect import bisect_right
 
@@ -17,40 +17,17 @@ class PiecePoly():
 		dim = 0
 	def eval(self, x):
 		poly_idx = bisect_right(self.breaks[0], x) - 1
-		poly_shift = self.breaks[0][poly_idx]	
+		poly_shift = self.breaks[0][poly_idx]
 		return self.horner(self.coefs[poly_idx], x - poly_shift)
 
 class PPoly():
-	def mkpp(self, breaks,coefs,*args):
-		if len(args)==1:
-			d = np.transpose(args[0])
-		else:
-			d = 1
-		sum=0
-		try:
-			for i in range(len(coefs)):
-				for j in range(len(coefs[i])):
-					sum = sum+len(coefs[i][j])
-		except:
-			try:
-				for i in range(len(coefs)):
-					sum = sum+len(coefs[i])
-			except:
-				sum = len(coefs)
-
+	
+	def mkpp(self, breaks, coefs):	
+		d = 1
+		sum= len(coefs[0]) * len(coefs)
 		dlk = sum
 		l = len(breaks)-1
-
-		try:
-			if len(d) > 1:
-				prod = 0
-				for i in range(len(d)):
-					prod = prod*d[i]
-				dl = prod*l
-			else:
-				dl = d*l
-		except:
-			dl = d*l
+		dl = d*l
 
 		k = dlk/dl+100*(math.pow(2,-52))
 		if k<0:
@@ -61,7 +38,7 @@ class PPoly():
 		if k<=0 or (dl*k!=dlk):
 			print ("ERROR: MISMATCH PP AND COEF")
 			return None
-
+		
 		pp = PiecePoly()
 		pp.form = 'pp'
 		pp.breaks = np.reshape(breaks,(1,l+1))

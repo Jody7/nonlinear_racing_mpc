@@ -14,7 +14,7 @@ from matplotlib import animation
 matloader = MatLoader()
 ppoly = PPoly()
 
-def augmentState(sim, x, u, x0, model_params, N):
+def augmentState(sim, x, u, x0, model_params, N, tl):
 	x[:,0] = x0
 	u[:,0] = u[:,1]
 
@@ -26,6 +26,16 @@ def augmentState(sim, x, u, x0, model_params, N):
 	u[:,N-1] = u[:,N-1]	# :3 helps readibility
 
 	x[:,N] = sim.step(model_params.dt_sim, x[:,N], u[:,N-1], model_params)
+
+	if x[2,0] - x[2,1] > math.pi:
+		print("AUGING! 1")
+		#x[2,1:-1] = x[2,1:-1] + 2*math.pi
+	if x[2,0] - x[2,1] < -math.pi:
+		print("AUGING! 2")
+		#x[2,1:-1] = x[2,1:-1] - 2*math.pi
+	if x[-1,0] - x[-1,1] < -0.75*tl:
+		print("AUGING! 3")
+		#x[-1,1:-1] = x[-1,1:-1]-tl 
 
 	return x, u
 
@@ -68,15 +78,24 @@ def find_theta(currentPosition,trackCenter,traj_breaks,trackWidth,last_closestId
 	theta = theta + cosinus*np.linalg.norm(np.array([posX, posY]) - trackCenter[:,minIndex2], 2)
 	return theta
 
+def unwrap_x0(x0):
+	if x0[2] > math.pi:
+		print("unwrapping 1")
+		x0[2] = x0[2] - 2*math.pi
+	if x0[2] < -math.pi:
+		print("unwrapping 2")
+		x0[2] = x0[2] + 2*math.pi
+	return x0
 
 def start_mpc():
 	global x, u, x0, u0, car_pos_list_x, car_pos_list_y
 	sim = SimulateSys()
 
-	dt_sim = 0.02
+	dt_sim = 0.04
 	x0 = np.zeros(7)
 	u0 = np.zeros(3)
-	model_params = ModelParams(0.287, 0.0545, 0.0518, 0.0035, 3.38, 1.26, 0.173, 2.57, 1.2, 0.192, 0.041, 27.8e-6, 0.029, 0.033)
+								#  Cm1, Cm2,   Cr0,     Cr2,     Br,     Cr    , Dr,    Bf,    Cf,   Df,    m,    Iz,       lf,     lr
+	model_params = ModelParams(0.287, 0.0545, 0.0518, 0.00035, 3.3852, 1.2691, 0.1737, 2.579, 1.2, 0.192, 0.041, 27.8e-6, 0.029, 0.033)
 	model_params.set_info(7, 3, dt_sim)
 	dlsm = DiscreteLinearModel()
 
@@ -93,21 +112,21 @@ def start_mpc():
 	x0 = np.array([track['center'][0][startIdx],track['center'][1][startIdx],
       	math.atan2(ppoly.mkpp(traj['dppy']['breaks'], traj['dppy']['coefs']).eval(theta),
 		ppoly.mkpp(traj['dppx']['breaks'], traj['dppx']['coefs']).eval(theta)),
-      0,0,0,theta])
+      2.0,0,0,theta])
     # ------------
 
 	mpc_solve = MPC_solve(dlsm)
-	N = 40
+	N = 10
 	x = np.zeros((7,N+1))
 	for i in range(N+1):
 		x[:,i] = x0
 	u = np.zeros((3,N))
 
 	fig, (ax1) = plt.subplots(1,1)
-	lines = [(ax1.plot([], [], lw=2)[0]), (ax1.plot([], [], lw=2)[0]), (ax1.plot([], [], lw=2)[0])]
+	lines = [(ax1.plot([], [], lw=3)[0]), (ax1.plot([], [], linestyle='dashed')[0]), (ax1.plot([], [], linestyle='dashed')[0]), (ax1.plot([], [], linestyle='dotted')[0]), (ax1.plot([], [], linestyle='dotted')[0]), (ax1.plot([], [], lw=2, color='pink')[0]) , (ax1.plot([], [], lw=2, color='pink')[0])]
 	car_pos_list_x = []
 	car_pos_list_y = []
-	axis_lims_inner = 4
+	axis_lims_inner = 2
 	ax1.set_xlim(-axis_lims_inner, axis_lims_inner)
 	ax1.set_ylim(-axis_lims_inner, axis_lims_inner)
 	ax1.set_aspect('equal', 'box')
@@ -117,19 +136,37 @@ def start_mpc():
 
 	def solve(solve_idx):
 		global x, u, x0, u0
-		x, u = augmentState(sim, x, u, x0, model_params, N)
-		x, u = mpc_solve.solve_routine(TrackMPC, N, model_params, x, u, x0, u0)
+		x, u = augmentState(sim, x, u, x0, model_params, N, TrackMPC['tl'])
+		borders = None
+
+		sqp_damping_x = 0.75
+		sqp_damping_u = 0.75
+		for sqp_idx in range(2):
+			x_solve, u_solve, borders = mpc_solve.solve_routine(TrackMPC, N, model_params, x, u, x0, u0)
+			x = sqp_damping_x*x + (1-sqp_damping_x)*x_solve
+			u = sqp_damping_u*u + (1-sqp_damping_u)*u_solve
 
 		# apply linearized mp estimate and solution to ODE to get nonlinear sol
 		x0 = sim.step(dt_sim, x[:,0], u[:,0], model_params)
+		#x0 = unwrap_x0(x0)
 		u0 = u[:,0]
 		theta = find_theta([x0[0], x0[1]],track['center'],traj['ppx']['breaks'],trackWidth,0)
-		print("theta:", theta, "u0 in solve:" ,u0)
+		#print("theta:", theta, "u0 in solve:" ,u0, x0[2])
 		x0[model_params.nx-1] = theta
 
 		car_pos_list_x.append(x[0][0])
 		car_pos_list_y.append(x[1][0])
 		lines[0].set_data(car_pos_list_x, car_pos_list_y)
+		lines[3].set_data(x[0], x[1])
+		
+		plot_traj_data_x = []
+		plot_traj_data_y = []
+		for i in range(len(x[6])):
+			plot_traj_data_x.append(ppoly.mkpp(TrackMPC['traj']['ppx']['breaks'], TrackMPC['traj']['ppx']['coefs']).eval(x[6][i]))
+			plot_traj_data_y.append(ppoly.mkpp(TrackMPC['traj']['ppy']['breaks'], TrackMPC['traj']['ppy']['coefs']).eval(x[6][i]))
+		lines[4].set_data(plot_traj_data_x, plot_traj_data_y)
+		lines[5].set_data(borders[0], borders[1]) # Left Side
+		lines[6].set_data(borders[2], borders[3]) # Right Side
 
 		return lines
 
@@ -138,5 +175,6 @@ def start_mpc():
 
 
 np.set_printoptions(precision=4, suppress=True)
+np.show_config()
 load_matlab()
 start_mpc()

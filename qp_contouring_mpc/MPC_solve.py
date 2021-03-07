@@ -10,8 +10,8 @@ ppoly = PPoly()
 bounds = np.matrix([
 	[-1, 1],
 	[-1, 1],
-	[-500, 500],
-	[0, 1],
+	[-3, 3],
+	[0, 0.2],
 	[-1, 1],
 	[-1, 1],
 	[0, 1],
@@ -117,8 +117,6 @@ def getErrors(TrackMPC, theta_virt, x_phys, y_phys):
 	x_virt = ppoly.mkpp(TrackMPC['traj']['ppx']['breaks'], TrackMPC['traj']['ppx']['coefs']).eval(theta_virt)
 	y_virt = ppoly.mkpp(TrackMPC['traj']['ppy']['breaks'], TrackMPC['traj']['ppy']['coefs']).eval(theta_virt)
 
-	print(theta_virt,dxdth,dydth,x_virt,y_virt);
-
 	phi_virt = math.atan2(dydth, dxdth)
 	sin_phi_virt = math.sin(phi_virt)
 	cos_phi_virt = math.cos(phi_virt)
@@ -139,8 +137,6 @@ def generateF(TrackMPC, model_params, Xk, i, N):
 	grad_e = np.matrix(
 		[grad_eC,
 		grad_eL])
-
-	print(e)
 
 	if i == N:
 		Q = np.diag([10 * 0.1, 1000])
@@ -197,6 +193,8 @@ class MPC_solve():
 		self.dlsm = dlsm
 
 	def solve_routine(self, TrackMPC, N, model_params, Xhor, Uhor, x0, u0):
+		t0 = time.time()
+
 		theta_phys = []
 		for i in range(N):
 			theta_virt = Xhor[model_params.nx - 1][i] % TrackMPC['tl']
@@ -225,18 +223,17 @@ class MPC_solve():
 		stage[0]["x0"] = x0
 		stage[0]["u0"] = u0
 
-		for i in range(0, N+1):
+		for i in range(0, N+1):			
 			Xk = Xhor[:,i];
 			if i < N:
 				Uk = Uhor[:,i];
 				stage[i]["Ak"], stage[i]["Bk"], stage[i]["gk"] = getEqualityConstraints(Xk, Uk, model_params, self.dlsm)
 				stage[i]["Ck"], stage[i]["ug"], stage[i]["lg"] = getInequalityConstraints(borders[:,max(i-1, 0)], model_params)
 			else:
-				stage[i]["Ck"], stage[i]["ug"], stage[i]["lg"] = getInequalityConstraints(borders[:,max(i-2, 0)], model_params)
-
+				stage[i]["Ck"], stage[i]["ug"], stage[i]["lg"] = getInequalityConstraints(borders[:,max(i-1, 0)], model_params)
 			stage[i]["Qk"] = generateH(TrackMPC, model_params, Xk, i, N)
 			stage[i]["fk"] = generateF(TrackMPC, model_params, Xk, i, N)
-			stage[i]["Rk"] = 2 * np.diag([0.01, 1, 1e-3])
+			stage[i]["Rk"] = 2 * np.diag([0.01, 0.1, 1e-3])
 
 		cost = 0.0
 		constr = []
@@ -245,7 +242,7 @@ class MPC_solve():
 		for stage_idx in range(N):
 			#matprint(stage[stage_idx]["Qk"], ".6f")
 			#matprint(stage[stage_idx]["Rk"], ".6f")
-			print("fk", stage_idx, stage[stage_idx]["fk"][0])
+			#print("fk", stage_idx, stage[stage_idx]["fk"][0])
 			#matprint(stage[stage_idx]["Ak"], ".6f")
 			#matprint(stage[stage_idx]["Bk"], ".6f")
 			#print(stage[stage_idx]["gk"])
@@ -253,6 +250,11 @@ class MPC_solve():
 			#print(stage[stage_idx]["ug"])
 			#print(stage[stage_idx]["lg"])
 			#print("---", stage_idx)
+
+			matprint(stage[stage_idx]["Qk"], ".3f")
+			#print(np.linalg.eigvals(stage[stage_idx]["Qk"]))
+			#print(np.all(np.linalg.eigvals(stage[stage_idx]["Qk"]) > 0))
+			print("---")
 
 			constr += [cvxpy.reshape(x[:,stage_idx+1], (10, 1)) == (cvxpy.reshape(stage[stage_idx]["Ak"] @ x[:,stage_idx], (10, 1)) + cvxpy.reshape(stage[stage_idx]["Bk"] @ u[:,stage_idx], (10, 1)) + stage[stage_idx]["gk"])]
 			constr += [stage[stage_idx]["Ck"] @ x[:,stage_idx] <= stage[stage_idx]["ug"]]
@@ -276,23 +278,28 @@ class MPC_solve():
 		constr += [stage[stage_idx]["Ck"] @ x[:,stage_idx] >= stage[stage_idx]["lg"]]
 		constr += [cvxpy.reshape(x[:,stage_idx], (model_params.nx+model_params.nu, 1)) >= bounds[:model_params.nx+model_params.nu,0]]
 		constr += [cvxpy.reshape(x[:,stage_idx], (model_params.nx+model_params.nu, 1)) <= bounds[:model_params.nx+model_params.nu,1]]
-
 		problem = cvxpy.Problem(cvxpy.Minimize(cost), constr)
-		problem.solve(solver=cvxpy.GUROBI, warm_start=True, verbose=False)
 
+		try:
+			problem.solve(solver=cvxpy.ECOS, warm_start=True, verbose=False)
+		except:
+			pass
+
+		#print(time.time() - t0)
 		x_value = Xhor
 		u_value = Uhor
 
-		print(problem.status)
-		if problem.status == "optimal":
+		if x.value is not None:
 			x_value = model_params.invTx @ x.value[0:model_params.nx,]
 			u_value = model_params.invTu @ x.value[model_params.nx:model_params.nx+model_params.nu,1:]
 
-			matprint(x_value, ".3f")
-			print("==")
-			matprint(u_value, ".3f")
+			#matprint(x_value, ".2f")
+			#print("==")
+			#matprint(u_value, ".3f")
 			#print("==")
 			#matprint(u.value, ".2f")
-			print("----------")
-
-		return x_value, u_value
+			#print("----------")
+		else:
+			print("no sol", time.time())
+		
+		return x_value, u_value, borders

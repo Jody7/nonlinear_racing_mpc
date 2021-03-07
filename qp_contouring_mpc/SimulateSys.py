@@ -1,9 +1,9 @@
 import numpy as np
 import math
-from scipy.integrate import odeint
+from scipy.integrate import solve_ivp
 
 class SimulateSys():
-	def calc_dynamics(self, x, t, u, ModelParams):
+	def calc_dynamics(self, t, x, u, ModelParams):
 		Cm1=ModelParams.Cm1
 		Cm2=ModelParams.Cm2
 		Cr0=ModelParams.Cr0
@@ -47,6 +47,5 @@ class SimulateSys():
 		return xdot
 
 	def step(self, dt, x, u, ModelParams):
-		t = np.linspace(0, dt, 2)
-		sol = odeint(self.calc_dynamics, x, t, args=(u, ModelParams))
-		return np.array(sol[-1])
+		sol = solve_ivp(self.calc_dynamics, (0, dt), x, args=(u, ModelParams), method = 'RK45')
+		return sol.y[:, -1]
