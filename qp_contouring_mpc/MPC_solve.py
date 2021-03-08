@@ -1,6 +1,6 @@
 from DiscreteLinearModel import DiscreteLinearModel
 
-import cvxpy, time, math
+import time, math, ctypes
 import numpy as np
 from PPoly import PPoly
 from scipy.linalg import block_diag
@@ -185,12 +185,22 @@ def getInequalityConstraints(border, model_params):
 
 	return Ck, ug, lg
 
+def stage_flatten(stage_idx, flat_mat, dest):
+	for elem_idx in range(len(flat_mat)):
+		dest[elem_idx + len(flat_mat) * stage_idx] = flat_mat[elem_idx]
+def stage_select(orig_mat, sel_opts):
+	res = []
+	for sel in sel_opts:
+		res.append(orig_mat[sel[0]-1, sel[1]-1])
+	return res
 
 class MPC_solve():
 
 	def __init__(self, dlsm):
-		print(cvxpy.installed_solvers())
 		self.dlsm = dlsm
+		self.so_file = "testsolver.exe"
+		self.so_load = ctypes.CDLL(self.so_file)
+		self.so_load.perform_solve.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_double))
 
 	def solve_routine(self, TrackMPC, N, model_params, Xhor, Uhor, x0, u0):
 		t0 = time.time()
@@ -213,9 +223,6 @@ class MPC_solve():
 
 		borders = np.matrix([TrackLeftx, TrackLefty, TrackRightx, TrackRighty])
 
-		x = cvxpy.Variable((model_params.nx+model_params.nu, N+1))
-		u = cvxpy.Variable((model_params.nu, N))
-
 		stage = {}
 		for i in range (0, N+1):
 			stage[i] = {}
@@ -235,71 +242,55 @@ class MPC_solve():
 			stage[i]["fk"] = generateF(TrackMPC, model_params, Xk, i, N)
 			stage[i]["Rk"] = 2 * np.diag([0.01, 0.1, 1e-3])
 
-		cost = 0.0
-		constr = []
-		constr += [x[:,0] == cvxpy.reshape(np.diag(np.concatenate((model_params.Tx.diagonal(), model_params.Tu.diagonal()))) @ np.matrix(np.concatenate(([stage[0]["x0"], stage[0]["u0"]]))).T, (10, ))]
+		T = N - 1
+
+		_Qk = [0] * 100 * (T+2)
+		_Rk = [0] * 3 * (T+1)
+		_fk = [0] * 4 * (T+2)
+		_Ak = [0] * 40 * (T+1)
+		_Bk = [0] * 16 * (T+1)
+		_gk = [0] * 6 * (T+1)
+		_Ck = [0] * 2 * (T+2)
+		_ug = [0] * 1 * (T+2)
+		_lg = [0] * 1 * (T+2)
+		_x = np.asarray((np.diag(np.concatenate((model_params.Tx.diagonal(), model_params.Tu.diagonal()))) @ np.matrix(np.concatenate(([stage[0]["x0"], stage[0]["u0"]]))).T).flatten())[0]
 
 		for stage_idx in range(N):
-			#matprint(stage[stage_idx]["Qk"], ".6f")
-			#matprint(stage[stage_idx]["Rk"], ".6f")
-			#print("fk", stage_idx, stage[stage_idx]["fk"][0])
-			#matprint(stage[stage_idx]["Ak"], ".6f")
-			#matprint(stage[stage_idx]["Bk"], ".6f")
-			#print(stage[stage_idx]["gk"])
-			#print(stage[stage_idx]["Ck"])
-			#print(stage[stage_idx]["ug"])
-			#print(stage[stage_idx]["lg"])
-			#print("---", stage_idx)
+			stage_flatten(stage_idx, stage[stage_idx]["Rk"].diagonal(), _Rk)
+			stage_flatten(stage_idx, stage_select(stage[stage_idx]["Ak"], [(1,1), (1,3), (1,4), (1,5), (1,6), (1,8), (1,9), (2,2), (2,3), (2,4), (2,5), (2,6), (2,8), (2,9), (3,3), (3,4), (3,5), (3,6), (3,8), (3,9), (4,4), (4,5), (4,6), (4,8), (4,9), (5,4), (5,5), (5,6), (5,8), (5,9), (6,4), (6,5), (6,6), (6,8), (6,9), (7,7), (7,10), (8,8), (9,9), (10,10)]), _Ak)
+			stage_flatten(stage_idx, stage_select(stage[stage_idx]["Bk"], [(1,1), (1,2), (2,1), (2,2), (3,1), (3,2), (4,1), (4,2), (5,1), (5,2), (6,1), (6,2), (7,3), (8,1), (9,2), (10,3)]), _Bk)
+			stage_flatten(stage_idx, stage_select(stage[stage_idx]["gk"], [(1,1), (2,1), (3,1), (4,1), (5,1), (6,1)]), _gk)
 
-			matprint(stage[stage_idx]["Qk"], ".3f")
-			#print(np.linalg.eigvals(stage[stage_idx]["Qk"]))
-			#print(np.all(np.linalg.eigvals(stage[stage_idx]["Qk"]) > 0))
-			print("---")
+		for stage_idx in range(N+1):
+			stage_flatten(stage_idx, stage[stage_idx]["Qk"].flatten('C'), _Qk)
+			stage_flatten(stage_idx, stage_select(stage[stage_idx]["fk"], [(1,1), (2,1), (7,1), (10,1)]), _fk)
+			stage_flatten(stage_idx, [stage[stage_idx]["Ck"][0], stage[stage_idx]["Ck"][1]], _Ck)
+			stage_flatten(stage_idx, [stage[stage_idx]["ug"][0, 0]], _ug)
+			stage_flatten(stage_idx, [stage[stage_idx]["lg"][0, 0]], _lg)
 
-			constr += [cvxpy.reshape(x[:,stage_idx+1], (10, 1)) == (cvxpy.reshape(stage[stage_idx]["Ak"] @ x[:,stage_idx], (10, 1)) + cvxpy.reshape(stage[stage_idx]["Bk"] @ u[:,stage_idx], (10, 1)) + stage[stage_idx]["gk"])]
-			constr += [stage[stage_idx]["Ck"] @ x[:,stage_idx] <= stage[stage_idx]["ug"]]
-			constr += [stage[stage_idx]["Ck"] @ x[:,stage_idx] >= stage[stage_idx]["lg"]]
+		t_0 = time.time()
+		res = self.so_load.perform_solve(T,
+			(ctypes.c_double*len(_Qk))(*_Qk),
+			(ctypes.c_double*len(_Rk))(*_Rk),
+			(ctypes.c_double*len(_fk))(*_fk),
+			(ctypes.c_double*len(_Ak))(*_Ak),
+			(ctypes.c_double*len(_Bk))(*_Bk),
+			(ctypes.c_double*len(_gk))(*_gk),
+			(ctypes.c_double*len(_Ck))(*_Ck),
+			(ctypes.c_double*len(_ug))(*_ug),
+			(ctypes.c_double*len(_lg))(*_lg),
+			(ctypes.c_double*len(_x))(*_x)
+		)
+		#print("solver hz = " , 1/(time.time() - t_0))
 
-			constr += [cvxpy.reshape(x[:,stage_idx], (model_params.nx+model_params.nu, 1)) >= bounds[:model_params.nx+model_params.nu,0]]
-			constr += [cvxpy.reshape(u[:,stage_idx], (model_params.nu, 1)) >= bounds[model_params.nx+model_params.nu:model_params.nx+2*model_params.nu,0]]
-			constr += [cvxpy.reshape(x[:,stage_idx], (model_params.nx+model_params.nu, 1)) <= bounds[:model_params.nx+model_params.nu,1]]
-			constr += [cvxpy.reshape(u[:,stage_idx], (model_params.nu, 1)) <= bounds[model_params.nx+model_params.nu:model_params.nx+2*model_params.nu,1]]
+		x_solved_list = []
+		for i in range(N+1):
+			x_solved_list.append([res[i][0], res[i][1], res[i][2], res[i][3], res[i][4], res[i][5], res[i][6], res[i][7], res[i][8], res[i][9]])
+		x_solved_mat = np.array(x_solved_list).transpose()
 
-			cost += 0.5*cvxpy.quad_form(x[:,stage_idx], stage[stage_idx]["Qk"])
-			cost += cvxpy.quad_form(u[:,stage_idx], stage[stage_idx]["Rk"])
-			cost += (stage[stage_idx]["fk"].transpose() @ x[:,stage_idx])
+		x_value = model_params.invTx @ x_solved_mat[0:model_params.nx,]
+		u_value = model_params.invTu @ x_solved_mat[model_params.nx:model_params.nx+model_params.nu,1:]
 
+		#matprint(x_value, ".2f")
 
-		# --- AFTERWARDS DO TERMINAL STATE CONSTRAINT AND COST
-		stage_idx = N
-		cost += 0.5*cvxpy.quad_form(x[:,stage_idx], stage[stage_idx]["Qk"])
-		cost += (stage[stage_idx]["fk"].transpose() @ x[:,stage_idx])
-		constr += [stage[stage_idx]["Ck"] @ x[:,stage_idx] <= stage[stage_idx]["ug"]]
-		constr += [stage[stage_idx]["Ck"] @ x[:,stage_idx] >= stage[stage_idx]["lg"]]
-		constr += [cvxpy.reshape(x[:,stage_idx], (model_params.nx+model_params.nu, 1)) >= bounds[:model_params.nx+model_params.nu,0]]
-		constr += [cvxpy.reshape(x[:,stage_idx], (model_params.nx+model_params.nu, 1)) <= bounds[:model_params.nx+model_params.nu,1]]
-		problem = cvxpy.Problem(cvxpy.Minimize(cost), constr)
-
-		try:
-			problem.solve(solver=cvxpy.ECOS, warm_start=True, verbose=False)
-		except:
-			pass
-
-		#print(time.time() - t0)
-		x_value = Xhor
-		u_value = Uhor
-
-		if x.value is not None:
-			x_value = model_params.invTx @ x.value[0:model_params.nx,]
-			u_value = model_params.invTu @ x.value[model_params.nx:model_params.nx+model_params.nu,1:]
-
-			#matprint(x_value, ".2f")
-			#print("==")
-			#matprint(u_value, ".3f")
-			#print("==")
-			#matprint(u.value, ".2f")
-			#print("----------")
-		else:
-			print("no sol", time.time())
-		
 		return x_value, u_value, borders

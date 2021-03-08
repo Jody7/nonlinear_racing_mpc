@@ -17,8 +17,8 @@ class PiecePoly():
 		dim = 0
 	def eval(self, x):
 		poly_idx = bisect_right(self.breaks[0], x) - 1
-		poly_shift = self.breaks[0][poly_idx]
-		return self.horner(self.coefs[poly_idx], x - poly_shift)
+		poly_shift = self.breaks[0][poly_idx % len(self.breaks[0])]
+		return self.horner(self.coefs[poly_idx % len(self.coefs)], x - poly_shift)
 
 class PPoly():
 	

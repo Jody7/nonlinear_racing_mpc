@@ -28,14 +28,11 @@ def augmentState(sim, x, u, x0, model_params, N, tl):
 	x[:,N] = sim.step(model_params.dt_sim, x[:,N], u[:,N-1], model_params)
 
 	if x[2,0] - x[2,1] > math.pi:
-		print("AUGING! 1")
-		#x[2,1:-1] = x[2,1:-1] + 2*math.pi
+		x[2,1:] = x[2,1:] + 2*math.pi
 	if x[2,0] - x[2,1] < -math.pi:
-		print("AUGING! 2")
-		#x[2,1:-1] = x[2,1:-1] - 2*math.pi
+		x[2,1:] = x[2,1:] - 2*math.pi
 	if x[-1,0] - x[-1,1] < -0.75*tl:
-		print("AUGING! 3")
-		#x[-1,1:-1] = x[-1,1:-1]-tl 
+		x[-1,1:] = x[-1,1:] - tl
 
 	return x, u
 
@@ -76,14 +73,12 @@ def find_theta(currentPosition,trackCenter,traj_breaks,trackWidth,last_closestId
 		cosinus = 0
 	theta = traj_breaks[minIndex2]
 	theta = theta + cosinus*np.linalg.norm(np.array([posX, posY]) - trackCenter[:,minIndex2], 2)
-	return theta
+	return theta 
 
 def unwrap_x0(x0):
 	if x0[2] > math.pi:
-		print("unwrapping 1")
 		x0[2] = x0[2] - 2*math.pi
 	if x0[2] < -math.pi:
-		print("unwrapping 2")
 		x0[2] = x0[2] + 2*math.pi
 	return x0
 
@@ -91,11 +86,11 @@ def start_mpc():
 	global x, u, x0, u0, car_pos_list_x, car_pos_list_y
 	sim = SimulateSys()
 
-	dt_sim = 0.04
+	dt_sim = 0.025
 	x0 = np.zeros(7)
 	u0 = np.zeros(3)
-								#  Cm1, Cm2,   Cr0,     Cr2,     Br,     Cr    , Dr,    Bf,    Cf,   Df,    m,    Iz,       lf,     lr
-	model_params = ModelParams(0.287, 0.0545, 0.0518, 0.00035, 3.3852, 1.2691, 0.1737, 2.579, 1.2, 0.192, 0.041, 27.8e-6, 0.029, 0.033)
+								#  Cm1, Cm2,   Cr0,     Cr2,     Br,          Cr , Dr,    Bf,    Cf,   Df,    m,    Iz,       lf,     lr
+	model_params = ModelParams(0.287*1.5, 0.0545*3, 0.0518, 0.00035, 3.3852*0.5,  0.8, 0.1737, 2.579, 1.2, 0.192, 0.041, 27.8e-6, 0.029, 0.033)
 	model_params.set_info(7, 3, dt_sim)
 	dlsm = DiscreteLinearModel()
 
@@ -112,11 +107,11 @@ def start_mpc():
 	x0 = np.array([track['center'][0][startIdx],track['center'][1][startIdx],
       	math.atan2(ppoly.mkpp(traj['dppy']['breaks'], traj['dppy']['coefs']).eval(theta),
 		ppoly.mkpp(traj['dppx']['breaks'], traj['dppx']['coefs']).eval(theta)),
-      2.0,0,0,theta])
+      0.0,0,0,theta])
     # ------------
 
 	mpc_solve = MPC_solve(dlsm)
-	N = 10
+	N = 25
 	x = np.zeros((7,N+1))
 	for i in range(N+1):
 		x[:,i] = x0
@@ -124,6 +119,9 @@ def start_mpc():
 
 	fig, (ax1) = plt.subplots(1,1)
 	lines = [(ax1.plot([], [], lw=3)[0]), (ax1.plot([], [], linestyle='dashed')[0]), (ax1.plot([], [], linestyle='dashed')[0]), (ax1.plot([], [], linestyle='dotted')[0]), (ax1.plot([], [], linestyle='dotted')[0]), (ax1.plot([], [], lw=2, color='pink')[0]) , (ax1.plot([], [], lw=2, color='pink')[0])]
+	lines_len = len(lines)
+	lines.append(None)
+
 	car_pos_list_x = []
 	car_pos_list_y = []
 	axis_lims_inner = 2
@@ -139,8 +137,8 @@ def start_mpc():
 		x, u = augmentState(sim, x, u, x0, model_params, N, TrackMPC['tl'])
 		borders = None
 
-		sqp_damping_x = 0.75
-		sqp_damping_u = 0.75
+		sqp_damping_x = 0.7
+		sqp_damping_u = 0.7
 		for sqp_idx in range(2):
 			x_solve, u_solve, borders = mpc_solve.solve_routine(TrackMPC, N, model_params, x, u, x0, u0)
 			x = sqp_damping_x*x + (1-sqp_damping_x)*x_solve
@@ -148,11 +146,16 @@ def start_mpc():
 
 		# apply linearized mp estimate and solution to ODE to get nonlinear sol
 		x0 = sim.step(dt_sim, x[:,0], u[:,0], model_params)
-		#x0 = unwrap_x0(x0)
+		x0 = unwrap_x0(x0)
 		u0 = u[:,0]
 		theta = find_theta([x0[0], x0[1]],track['center'],traj['ppx']['breaks'],trackWidth,0)
 		#print("theta:", theta, "u0 in solve:" ,u0, x0[2])
 		x0[model_params.nx-1] = theta
+
+		if len(car_pos_list_x) > 100:
+			for i in range(10):
+				car_pos_list_x.pop(0)
+				car_pos_list_y.pop(0)
 
 		car_pos_list_x.append(x[0][0])
 		car_pos_list_y.append(x[1][0])
@@ -167,6 +170,11 @@ def start_mpc():
 		lines[4].set_data(plot_traj_data_x, plot_traj_data_y)
 		lines[5].set_data(borders[0], borders[1]) # Left Side
 		lines[6].set_data(borders[2], borders[3]) # Right Side
+
+		car_arrow_size = 0.1
+		car_arrow = plt.Arrow(x[0][0],x[1][0],car_arrow_size*math.cos(x[2][0]),car_arrow_size*math.sin(x[2][0]), color = 'r', width=0.3)
+		ax1.add_patch(car_arrow)
+		lines[lines_len] = car_arrow
 
 		return lines
 
